@@ -2,234 +2,207 @@ using Stateless;
 
 namespace BugPro;
 
-/// <summary>
-/// Класс, описывающий workflow процесса разработки задачи (Task)
-/// </summary>
-public sealed class DevelopmentTask
+public sealed class Bug
 {
-    // Состояния задачи
-    public enum TaskState
+    private readonly List<string> _history = [];
+
+    public enum State
     {
-        Backlog,        // В бэклоге
-        Analysis,       // Анализируется
-        Planned,        // Запланирована
-        InDevelopment,  // В разработке
-        CodeReview,     // На код-ревью
-        Testing,        // На тестировании
-        Fixing,         // Исправление ошибок
-        ReadyForRelease,// Готова к релизу
-        Done,           // Выполнена
-        Blocked,        // Заблокирована
-        Cancelled       // Отменена
+        New,
+        Triaged,
+        InProgress,
+        WaitingForInfo,
+        Deferred,
+        Resolved,
+        Closed,
+        Reopened,
+        Rejected,
+        Duplicate,
+        CannotReproduce
     }
 
-    // Триггеры (действия)
-    public enum TaskTrigger
+    public enum Trigger
     {
-        StartAnalysis,
-        ApproveAnalysis,
-        StartDevelopment,
-        CompleteDevelopment,
-        RequestReview,
-        ApproveReview,
-        RequestChanges,
-        StartTesting,
-        PassTests,
-        FailTests,
-        FixIssue,
-        Release,
-        Block,
-        Unblock,
-        Cancel,
-        Reopen
+        Triage,
+        StartProgress,
+        RequestInfo,
+        ProvideInfo,
+        Defer,
+        Resume,
+        Resolve,
+        VerifyFix,
+        Reopen,
+        Close,
+        MarkNotABug,
+        MarkDuplicate,
+        MarkCannotReproduce,
+        ReturnToTriaged
     }
 
-    private readonly StateMachine<TaskState, TaskTrigger> _workflow;
-    private readonly StateMachine<TaskState, TaskTrigger>.TriggerWithParameters<string> _failTestsTrigger;
+    private readonly StateMachine<State, Trigger> _workflow;
+    private readonly StateMachine<State, Trigger>.TriggerWithParameters<bool> _verifyFixTrigger;
 
-    private readonly List<string> _transitionHistory = new();
-
-    public DevelopmentTask()
+    public Bug()
     {
-        _workflow = new StateMachine<TaskState, TaskTrigger>(TaskState.Backlog);
-        _failTestsTrigger = _workflow.SetTriggerParameters<string>(TaskTrigger.FailTests);
-        
+        _workflow = new StateMachine<State, Trigger>(State.New);
+        _verifyFixTrigger = _workflow.SetTriggerParameters<bool>(Trigger.VerifyFix);
+
         ConfigureWorkflow();
     }
 
-    public TaskState CurrentState => _workflow.State;
-    public IReadOnlyList<string> History => _transitionHistory.AsReadOnly();
-    public bool IsCompleted => CurrentState is TaskState.Done or TaskState.Cancelled;
+    public IReadOnlyList<string> History => _history.AsReadOnly();
 
-    // Публичные методы для переходов
-    public void StartAnalysis() => Fire(TaskTrigger.StartAnalysis);
-    public void ApproveAnalysis() => Fire(TaskTrigger.ApproveAnalysis);
-    public void StartDevelopment() => Fire(TaskTrigger.StartDevelopment);
-    public void CompleteDevelopment() => Fire(TaskTrigger.CompleteDevelopment);
-    public void RequestReview() => Fire(TaskTrigger.RequestReview);
-    public void ApproveReview() => Fire(TaskTrigger.ApproveReview);
-    public void RequestChanges() => Fire(TaskTrigger.RequestChanges);
-    public void StartTesting() => Fire(TaskTrigger.StartTesting);
-    public void PassTests() => Fire(TaskTrigger.PassTests);
-    public void FailTests(string reason) => _workflow.Fire(_failTestsTrigger, reason);
-    public void FixIssue() => Fire(TaskTrigger.FixIssue);
-    public void Release() => Fire(TaskTrigger.Release);
-    public void Block() => Fire(TaskTrigger.Block);
-    public void Unblock() => Fire(TaskTrigger.Unblock);
-    public void Cancel() => Fire(TaskTrigger.Cancel);
-    public void Reopen() => Fire(TaskTrigger.Reopen);
+    public State CurrentState => _workflow.State;
 
-    public bool CanTrigger(TaskTrigger trigger) => _workflow.CanFire(trigger);
-    
-    public string GetReport() => $"Task State: {CurrentState}, Completed: {IsCompleted}, Transitions: {_transitionHistory.Count}";
+    public bool CanFire(Trigger trigger) => _workflow.CanFire(trigger);
 
-    public override string ToString() => GetReport();
+    public bool IsFinalState =>
+        CurrentState is State.Closed or State.Rejected or State.Duplicate;
+
+    public void Triage() => Fire(Trigger.Triage);
+
+    public void StartProgress() => Fire(Trigger.StartProgress);
+
+    public void RequestInfo() => Fire(Trigger.RequestInfo);
+
+    public void ProvideInfo() => Fire(Trigger.ProvideInfo);
+
+    public void Defer() => Fire(Trigger.Defer);
+
+    public void Resume() => Fire(Trigger.Resume);
+
+    public void Resolve() => Fire(Trigger.Resolve);
+
+    public void VerifyFix(bool isFixed) => _workflow.Fire(_verifyFixTrigger, isFixed);
+
+    public void Reopen() => Fire(Trigger.Reopen);
+
+    public void Close() => Fire(Trigger.Close);
+
+    public void MarkNotABug() => Fire(Trigger.MarkNotABug);
+
+    public void MarkDuplicate() => Fire(Trigger.MarkDuplicate);
+
+    public void MarkCannotReproduce() => Fire(Trigger.MarkCannotReproduce);
+
+    public void ReturnToTriaged() => Fire(Trigger.ReturnToTriaged);
+
+    public string GetStatusReport() =>
+        $"Bug state: {CurrentState}; final: {IsFinalState}; history size: {History.Count}";
+
+    public override string ToString() => GetStatusReport();
 
     private void ConfigureWorkflow()
     {
-        // Отслеживание истории
-        _workflow.OnTransitioned(t => 
-            _transitionHistory.Add($"[{DateTime.Now:HH:mm:ss}] {t.Source} --{t.Trigger}--> {t.Destination}"));
+        RegisterTransitionTracking();
 
-        // Настройка всех состояний
-        ConfigureBacklogState();
-        ConfigureAnalysisState();
-        ConfigurePlannedState();
-        ConfigureInDevelopmentState();
-        ConfigureCodeReviewState();
-        ConfigureTestingState();
-        ConfigureFixingState();
-        ConfigureReadyForReleaseState();
-        ConfigureDoneState();
-        ConfigureBlockedState();
-        ConfigureCancelledState();
+        ConfigureNewState();
+        ConfigureTriagedState();
+        ConfigureInProgressState();
+        ConfigureWaitingForInfoState();
+        ConfigureDeferredState();
+        ConfigureResolvedState();
+        ConfigureReviewStates();
+        ConfigureReopenedState();
     }
 
-    private void ConfigureBacklogState()
+    private void RegisterTransitionTracking()
     {
-        _workflow.Configure(TaskState.Backlog)
-            .Permit(TaskTrigger.StartAnalysis, TaskState.Analysis)
-            .Permit(TaskTrigger.Cancel, TaskState.Cancelled);
+        _workflow.OnTransitioned(transition => _history.Add(FormatTransition(transition)));
     }
 
-    private void ConfigureAnalysisState()
+    private void ConfigureNewState()
     {
-        _workflow.Configure(TaskState.Analysis)
-            .Permit(TaskTrigger.ApproveAnalysis, TaskState.Planned)
-            .Permit(TaskTrigger.Block, TaskState.Blocked)
-            .Permit(TaskTrigger.Cancel, TaskState.Cancelled);
+        _workflow.Configure(State.New)
+            .Permit(Trigger.Triage, State.Triaged);
     }
 
-    private void ConfigurePlannedState()
+    private void ConfigureTriagedState()
     {
-        _workflow.Configure(TaskState.Planned)
-            .Permit(TaskTrigger.StartDevelopment, TaskState.InDevelopment)
-            .Permit(TaskTrigger.Block, TaskState.Blocked)
-            .Permit(TaskTrigger.Cancel, TaskState.Cancelled);
+        _workflow.Configure(State.Triaged)
+            .Permit(Trigger.StartProgress, State.InProgress)
+            .Permit(Trigger.RequestInfo, State.WaitingForInfo)
+            .Permit(Trigger.Defer, State.Deferred)
+            .Permit(Trigger.MarkNotABug, State.Rejected)
+            .Permit(Trigger.MarkDuplicate, State.Duplicate)
+            .Permit(Trigger.MarkCannotReproduce, State.CannotReproduce);
     }
 
-    private void ConfigureInDevelopmentState()
+    private void ConfigureInProgressState()
     {
-        _workflow.Configure(TaskState.InDevelopment)
-            .Permit(TaskTrigger.CompleteDevelopment, TaskState.CodeReview)
-            .Permit(TaskTrigger.Block, TaskState.Blocked);
+        _workflow.Configure(State.InProgress)
+            .Permit(Trigger.RequestInfo, State.WaitingForInfo)
+            .Permit(Trigger.Defer, State.Deferred)
+            .Permit(Trigger.Resolve, State.Resolved);
     }
 
-    private void ConfigureCodeReviewState()
+    private void ConfigureWaitingForInfoState()
     {
-        _workflow.Configure(TaskState.CodeReview)
-            .Permit(TaskTrigger.ApproveReview, TaskState.Testing)
-            .Permit(TaskTrigger.RequestChanges, TaskState.Fixing)
-            .Permit(TaskTrigger.Block, TaskState.Blocked);
+        _workflow.Configure(State.WaitingForInfo)
+            .Permit(Trigger.ProvideInfo, State.Triaged)
+            .Permit(Trigger.StartProgress, State.InProgress);
     }
 
-    private void ConfigureTestingState()
+    private void ConfigureDeferredState()
     {
-        _workflow.Configure(TaskState.Testing)
-            .Permit(TaskTrigger.PassTests, TaskState.ReadyForRelease)
-            .Permit(TaskTrigger.FailTests, TaskState.Fixing);
+        _workflow.Configure(State.Deferred)
+            .Permit(Trigger.Resume, State.Triaged);
     }
 
-    private void ConfigureFixingState()
+    private void ConfigureResolvedState()
     {
-        _workflow.Configure(TaskState.Fixing)
-            .Permit(TaskTrigger.FixIssue, TaskState.CodeReview);
+        _workflow.Configure(State.Resolved)
+            .PermitIf(_verifyFixTrigger, State.Closed, isFixed => isFixed)
+            .PermitIf(_verifyFixTrigger, State.Reopened, isFixed => !isFixed)
+            .Permit(Trigger.Reopen, State.Reopened);
     }
 
-    private void ConfigureReadyForReleaseState()
+    private void ConfigureReviewStates()
     {
-        _workflow.Configure(TaskState.ReadyForRelease)
-            .Permit(TaskTrigger.Release, TaskState.Done)
-            .Permit(TaskTrigger.Reopen, TaskState.InDevelopment);
+        _workflow.Configure(State.CannotReproduce)
+            .Permit(Trigger.Close, State.Closed)
+            .Permit(Trigger.Reopen, State.Reopened);
+
+        _workflow.Configure(State.Rejected)
+            .Permit(Trigger.Reopen, State.Reopened);
+
+        _workflow.Configure(State.Duplicate)
+            .Permit(Trigger.Reopen, State.Reopened);
+
+        _workflow.Configure(State.Closed)
+            .Permit(Trigger.Reopen, State.Reopened);
     }
 
-    private void ConfigureDoneState()
+    private void ConfigureReopenedState()
     {
-        _workflow.Configure(TaskState.Done)
-            .Permit(TaskTrigger.Reopen, TaskState.InDevelopment);
+        _workflow.Configure(State.Reopened)
+            .Permit(Trigger.ReturnToTriaged, State.Triaged)
+            .Permit(Trigger.StartProgress, State.InProgress);
     }
 
-    private void ConfigureBlockedState()
-    {
-        _workflow.Configure(TaskState.Blocked)
-            .Permit(TaskTrigger.Unblock, TaskState.Planned);
-    }
+    private static string FormatTransition(StateMachine<State, Trigger>.Transition transition) =>
+        $"{transition.Source} --{transition.Trigger}--> {transition.Destination}";
 
-    private void ConfigureCancelledState()
-    {
-        // Финальное состояние - нет переходов
-    }
-
-    private void Fire(TaskTrigger trigger) => _workflow.Fire(trigger);
+    private void Fire(Trigger trigger) => _workflow.Fire(trigger);
 }
 
-// Точка входа в приложение
 public static class Program
 {
     public static void Main()
     {
-        var task = new DevelopmentTask();
-        
-        Console.WriteLine("=== Development Task Workflow Demo ===");
-        Console.WriteLine($"Initial: {task.GetReport()}");
-        Console.WriteLine();
-        
-        // Демонстрация полного цикла работы задачи
-        task.StartAnalysis();
-        Console.WriteLine($"After analysis start: {task.CurrentState}");
-        
-        task.ApproveAnalysis();
-        Console.WriteLine($"After approval: {task.CurrentState}");
-        
-        task.StartDevelopment();
-        Console.WriteLine($"After dev start: {task.CurrentState}");
-        
-        task.CompleteDevelopment();
-        Console.WriteLine($"After dev complete: {task.CurrentState}");
-        
-        task.RequestReview();
-        Console.WriteLine($"After review request: {task.CurrentState}");
-        
-        task.ApproveReview();
-        Console.WriteLine($"After review approved: {task.CurrentState}");
-        
-        task.StartTesting();
-        Console.WriteLine($"After test start: {task.CurrentState}");
-        
-        task.PassTests();
-        Console.WriteLine($"After tests passed: {task.CurrentState}");
-        
-        task.Release();
-        Console.WriteLine($"After release: {task.CurrentState}");
-        
-        Console.WriteLine();
-        Console.WriteLine("=== Transition History ===");
-        foreach (var entry in task.History)
+        var bug = new Bug();
+
+        Console.WriteLine("Bug workflow demo");
+        Console.WriteLine(bug.GetStatusReport());
+        bug.Triage();
+        bug.StartProgress();
+        bug.Resolve();
+        bug.VerifyFix(false);
+        bug.ReturnToTriaged();
+        Console.WriteLine(bug.GetStatusReport());
+        foreach (var item in bug.History)
         {
-            Console.WriteLine(entry);
+            Console.WriteLine(item);
         }
-        
-        Console.WriteLine();
-        Console.WriteLine($"Final: {task.GetReport()}");
     }
 }

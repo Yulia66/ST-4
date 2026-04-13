@@ -17,5 +17,4 @@
   <ItemGroup>
     <ProjectReference Include="..\BugPro\BugPro.csproj" />
   </ItemGroup>
-
 </Project>
