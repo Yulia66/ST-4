@@ -70,6 +70,17 @@ public class DevelopmentTaskTests
     }
     
     [TestMethod]
+    public void RequestReview_MovesFromInDevelopmentToCodeReview()
+    {
+        var task = CreateTaskInState(DevelopmentTask.TaskState.InDevelopment);
+        
+        task.CompleteDevelopment();
+        task.RequestReview();
+        
+        Assert.AreEqual(DevelopmentTask.TaskState.CodeReview, task.CurrentState);
+    }
+    
+    [TestMethod]
     public void ApproveReview_MovesFromCodeReviewToTesting()
     {
         var task = CreateTaskInState(DevelopmentTask.TaskState.CodeReview);
@@ -404,16 +415,6 @@ public class DevelopmentTaskTests
     }
     
     [TestMethod]
-    public void RequestReview_FromInDevelopment_MovesToCodeReview()
-    {
-        var task = CreateTaskInState(DevelopmentTask.TaskState.InDevelopment);
-        
-        task.RequestReview();
-        
-        Assert.AreEqual(DevelopmentTask.TaskState.CodeReview, task.CurrentState);
-    }
-    
-    [TestMethod]
     public void StartTesting_FromCodeReview_MovesToTesting()
     {
         var task = CreateTaskInState(DevelopmentTask.TaskState.CodeReview);
@@ -478,6 +479,14 @@ public class DevelopmentTaskTests
         Assert.ThrowsException<InvalidOperationException>(() => task.Release());
     }
     
+    [TestMethod]
+    public void CannotRequestReviewFromCodeReviewState()
+    {
+        var task = CreateTaskInState(DevelopmentTask.TaskState.CodeReview);
+        
+        Assert.ThrowsException<InvalidOperationException>(() => task.RequestReview());
+    }
+    
     #endregion
 
     #region Helper Methods
@@ -529,7 +538,9 @@ public class DevelopmentTaskTests
                 task.StartDevelopment();
                 task.CompleteDevelopment();
                 task.RequestReview();
-                task.RequestChanges();
+                task.ApproveReview();
+                task.StartTesting();
+                task.FailTests("Test failed");
                 break;
                 
             case DevelopmentTask.TaskState.ReadyForRelease:
