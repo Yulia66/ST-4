@@ -74,7 +74,6 @@ public class DevelopmentTaskTests
     {
         var task = CreateTaskInState(DevelopmentTask.TaskState.InDevelopment);
         
-        task.CompleteDevelopment();
         task.RequestReview();
         
         Assert.AreEqual(DevelopmentTask.TaskState.CodeReview, task.CurrentState);
@@ -257,6 +256,23 @@ public class DevelopmentTaskTests
         var exception = Assert.ThrowsException<InvalidOperationException>(() => task.Release());
         
         StringAssert.Contains(exception.Message, "Release");
+    }
+    
+    [TestMethod]
+    public void CannotRequestReviewFromCodeReviewState()
+    {
+        var task = CreateTaskInState(DevelopmentTask.TaskState.CodeReview);
+        
+        // Должно выбросить исключение, так как RequestReview не разрешен из CodeReview
+        Assert.ThrowsException<InvalidOperationException>(() => task.RequestReview());
+    }
+    
+    [TestMethod]
+    public void CannotStartAnalysisFromInDevelopmentState()
+    {
+        var task = CreateTaskInState(DevelopmentTask.TaskState.InDevelopment);
+        
+        Assert.ThrowsException<InvalidOperationException>(() => task.StartAnalysis());
     }
     
     #endregion
@@ -479,14 +495,6 @@ public class DevelopmentTaskTests
         Assert.ThrowsException<InvalidOperationException>(() => task.Release());
     }
     
-    [TestMethod]
-    public void CannotRequestReviewFromCodeReviewState()
-    {
-        var task = CreateTaskInState(DevelopmentTask.TaskState.CodeReview);
-        
-        Assert.ThrowsException<InvalidOperationException>(() => task.RequestReview());
-    }
-    
     #endregion
 
     #region Helper Methods
@@ -520,7 +528,7 @@ public class DevelopmentTaskTests
                 task.ApproveAnalysis();
                 task.StartDevelopment();
                 task.CompleteDevelopment();
-                task.RequestReview();
+                // НЕ вызываем RequestReview здесь, так как это переход В это состояние
                 break;
                 
             case DevelopmentTask.TaskState.Testing:
