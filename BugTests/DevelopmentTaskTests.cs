@@ -385,7 +385,7 @@ public class DevelopmentTaskTests
     
     #endregion
 
-    #region Additional Tests (to reach 20+ tests)
+    #region Additional Tests
     
     [TestMethod]
     public void StartAnalysis_FromAnalysis_ThrowsException()
@@ -408,7 +408,6 @@ public class DevelopmentTaskTests
     {
         var task = CreateTaskInState(DevelopmentTask.TaskState.InDevelopment);
         
-        task.CompleteDevelopment();
         task.RequestReview();
         
         Assert.AreEqual(DevelopmentTask.TaskState.CodeReview, task.CurrentState);
@@ -442,6 +441,43 @@ public class DevelopmentTaskTests
         Assert.AreEqual(DevelopmentTask.TaskState.ReadyForRelease, task.CurrentState);
     }
     
+    [TestMethod]
+    public void BlockFromAnalysis_MovesToBlocked()
+    {
+        var task = CreateTaskInState(DevelopmentTask.TaskState.Analysis);
+        
+        task.Block();
+        
+        Assert.AreEqual(DevelopmentTask.TaskState.Blocked, task.CurrentState);
+    }
+    
+    [TestMethod]
+    public void CancelFromAnalysis_MovesToCancelled()
+    {
+        var task = CreateTaskInState(DevelopmentTask.TaskState.Analysis);
+        
+        task.Cancel();
+        
+        Assert.AreEqual(DevelopmentTask.TaskState.Cancelled, task.CurrentState);
+        Assert.IsTrue(task.IsCompleted);
+    }
+    
+    [TestMethod]
+    public void CannotPassTestsFromFixingState()
+    {
+        var task = CreateTaskInState(DevelopmentTask.TaskState.Fixing);
+        
+        Assert.ThrowsException<InvalidOperationException>(() => task.PassTests());
+    }
+    
+    [TestMethod]
+    public void CannotReleaseFromInDevelopmentState()
+    {
+        var task = CreateTaskInState(DevelopmentTask.TaskState.InDevelopment);
+        
+        Assert.ThrowsException<InvalidOperationException>(() => task.Release());
+    }
+    
     #endregion
 
     #region Helper Methods
@@ -450,7 +486,6 @@ public class DevelopmentTaskTests
     {
         var task = new DevelopmentTask();
         
-        // Достигаем нужного состояния через легальные переходы
         switch (targetState)
         {
             case DevelopmentTask.TaskState.Backlog:
@@ -476,6 +511,7 @@ public class DevelopmentTaskTests
                 task.ApproveAnalysis();
                 task.StartDevelopment();
                 task.CompleteDevelopment();
+                task.RequestReview();
                 break;
                 
             case DevelopmentTask.TaskState.Testing:
