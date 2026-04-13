@@ -2,23 +2,28 @@ using Stateless;
 
 namespace BugPro;
 
+/// <summary>
+/// Класс, описывающий workflow процесса разработки задачи (Task)
+/// </summary>
 public sealed class DevelopmentTask
 {
+    // Состояния задачи
     public enum TaskState
     {
-        Backlog,
-        Analysis,
-        Planned,
-        InDevelopment,
-        CodeReview,
-        Testing,
-        Fixing,
-        ReadyForRelease,
-        Done,
-        Blocked,
-        Cancelled
+        Backlog,        // В бэклоге
+        Analysis,       // Анализируется
+        Planned,        // Запланирована
+        InDevelopment,  // В разработке
+        CodeReview,     // На код-ревью
+        Testing,        // На тестировании
+        Fixing,         // Исправление ошибок
+        ReadyForRelease,// Готова к релизу
+        Done,           // Выполнена
+        Blocked,        // Заблокирована
+        Cancelled       // Отменена
     }
 
+    // Триггеры (действия)
     public enum TaskTrigger
     {
         StartAnalysis,
@@ -56,6 +61,7 @@ public sealed class DevelopmentTask
     public IReadOnlyList<string> History => _transitionHistory.AsReadOnly();
     public bool IsCompleted => CurrentState is TaskState.Done or TaskState.Cancelled;
 
+    // Публичные методы для переходов
     public void StartAnalysis() => Fire(TaskTrigger.StartAnalysis);
     public void ApproveAnalysis() => Fire(TaskTrigger.ApproveAnalysis);
     public void StartDevelopment() => Fire(TaskTrigger.StartDevelopment);
@@ -81,9 +87,11 @@ public sealed class DevelopmentTask
 
     private void ConfigureWorkflow()
     {
+        // Отслеживание истории
         _workflow.OnTransitioned(t => 
             _transitionHistory.Add($"[{DateTime.Now:HH:mm:ss}] {t.Source} --{t.Trigger}--> {t.Destination}"));
 
+        // Настройка всех состояний
         ConfigureBacklogState();
         ConfigureAnalysisState();
         ConfigurePlannedState();
@@ -139,7 +147,7 @@ public sealed class DevelopmentTask
     {
         _workflow.Configure(TaskState.Testing)
             .Permit(TaskTrigger.PassTests, TaskState.ReadyForRelease)
-            .Permit(_failTestsTrigger, TaskState.Fixing, (reason) => !string.IsNullOrEmpty(reason));
+            .Permit(TaskTrigger.FailTests, TaskState.Fixing);
     }
 
     private void ConfigureFixingState()
@@ -169,11 +177,13 @@ public sealed class DevelopmentTask
 
     private void ConfigureCancelledState()
     {
+        // Финальное состояние - нет переходов
     }
 
     private void Fire(TaskTrigger trigger) => _workflow.Fire(trigger);
 }
 
+// Точка входа в приложение
 public static class Program
 {
     public static void Main()
@@ -184,6 +194,7 @@ public static class Program
         Console.WriteLine($"Initial: {task.GetReport()}");
         Console.WriteLine();
         
+        // Демонстрация полного цикла работы задачи
         task.StartAnalysis();
         Console.WriteLine($"After analysis start: {task.CurrentState}");
         
