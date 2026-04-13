@@ -1,175 +1,540 @@
-using Stateless;
+using BugPro;
+using Microsoft.VisualStudio.TestTools.UnitTesting;
 
-namespace BugPro;
+namespace BugTests;
 
-public sealed class DevelopmentTask
+[TestClass]
+public class DevelopmentTaskTests
 {
-    public enum TaskState
-    {
-        Backlog,
-        Analysis,
-        Planned,
-        InDevelopment,
-        CodeReview,
-        Testing,
-        Fixing,
-        ReadyForRelease,
-       Done,
-        Blocked,
-        Cancelled
-    }
-
-    public enum TaskTrigger
-    {
-        StartAnalysis,
-        ApproveAnalysis,
-        StartDevelopment,
-        CompleteDevelopment,
-        RequestReview,
-        ApproveReview,
-        RequestChanges,
-        StartTesting,
-        PassTests,
-        FailTests,
-        FixIssue,
-        Release,
-        Block,
-        Unblock,
-        Cancel,
-        Reopen
-    }
-
-    private readonly StateMachine<TaskState, TaskTrigger> _workflow;
-    private readonly StateMachine<TaskState, TaskTrigger>.TriggerWithParameters<string> _failTestsTrigger;
-
-    private readonly List<string> _transitionHistory = new();
-
-    public DevelopmentTask()
-    {
-        _workflow = new StateMachine<TaskState, TaskTrigger>(TaskState.Backlog);
-        _failTestsTrigger = _workflow.SetTriggerParameters<string>(TaskTrigger.FailTests);
-        
-        ConfigureWorkflow();
-    }
-
-    public TaskState CurrentState => _workflow.State;
-    public IReadOnlyList<string> History => _transitionHistory.AsReadOnly();
-    public bool IsCompleted => CurrentState is TaskState.Done or TaskState.Cancelled;
-
-    public void StartAnalysis() => Fire(TaskTrigger.StartAnalysis);
-    public void ApproveAnalysis() => Fire(TaskTrigger.ApproveAnalysis);
-    public void StartDevelopment() => Fire(TaskTrigger.StartDevelopment);
-    public void CompleteDevelopment() => Fire(TaskTrigger.CompleteDevelopment);
-    public void RequestReview() => Fire(TaskTrigger.RequestReview);
-    public void ApproveReview() => Fire(TaskTrigger.ApproveReview);
-    public void RequestChanges() => Fire(TaskTrigger.RequestChanges);
-    public void StartTesting() => Fire(TaskTrigger.StartTesting);
-    public void PassTests() => Fire(TaskTrigger.PassTests);
-    public void FailTests(string reason) => _workflow.Fire(_failTestsTrigger, reason);
-    public void FixIssue() => Fire(TaskTrigger.FixIssue);
-    public void Release() => Fire(TaskTrigger.Release);
-    public void Block() => Fire(TaskTrigger.Block);
-    public void Unblock() => Fire(TaskTrigger.Unblock);
-    public void Cancel() => Fire(TaskTrigger.Cancel);
-    public void Reopen() => Fire(TaskTrigger.Reopen);
-
-    public bool CanTrigger(TaskTrigger trigger) => _workflow.CanFire(trigger);
+    #region Initial State Tests
     
-    public string GetReport() => $"Task State: {CurrentState}, Completed: {IsCompleted}, Transitions: {_transitionHistory.Count}";
-
-    public override string ToString() => GetReport();
-
-    private void ConfigureWorkflow()
+    [TestMethod]
+    public void TaskStartsInBacklogState()
     {
-        _workflow.OnTransitioned(t => 
-            _transitionHistory.Add($"[{DateTime.Now:HH:mm:ss}] {t.Source} --{t.Trigger}--> {t.Destination}"));
-
-        ConfigureBacklogState();
-        ConfigureAnalysisState();
-        ConfigurePlannedState();
-        ConfigureInDevelopmentState();
-        ConfigureCodeReviewState();
-        ConfigureTestingState();
-        ConfigureFixingState();
-        ConfigureReadyForReleaseState();
-        ConfigureDoneState();
-        ConfigureBlockedState();
-        ConfigureCancelledState();
+        var task = new DevelopmentTask();
+        
+        Assert.AreEqual(DevelopmentTask.TaskState.Backlog, task.CurrentState);
+        Assert.IsFalse(task.IsCompleted);
     }
-
-    private void ConfigureBacklogState()
+    
+    [TestMethod]
+    public void NewTaskHasEmptyHistory()
     {
-        _workflow.Configure(TaskState.Backlog)
-            .Permit(TaskTrigger.StartAnalysis, TaskState.Analysis)
-            .Permit(TaskTrigger.Cancel, TaskState.Cancelled);
+        var task = new DevelopmentTask();
+        
+        Assert.AreEqual(0, task.History.Count);
     }
+    
+    #endregion
 
-    private void ConfigureAnalysisState()
+    #region Happy Path Tests
+    
+    [TestMethod]
+    public void StartAnalysis_MovesFromBacklogToAnalysis()
     {
-        _workflow.Configure(TaskState.Analysis)
-            .Permit(TaskTrigger.ApproveAnalysis, TaskState.Planned)
-            .Permit(TaskTrigger.Block, TaskState.Blocked)
-            .Permit(TaskTrigger.Cancel, TaskState.Cancelled);
+        var task = new DevelopmentTask();
+        
+        task.StartAnalysis();
+        
+        Assert.AreEqual(DevelopmentTask.TaskState.Analysis, task.CurrentState);
     }
-
-    private void ConfigurePlannedState()
+    
+    [TestMethod]
+    public void ApproveAnalysis_MovesFromAnalysisToPlanned()
     {
-        _workflow.Configure(TaskState.Planned)
-            .Permit(TaskTrigger.StartDevelopment, TaskState.InDevelopment)
-            .Permit(TaskTrigger.Block, TaskState.Blocked)
-            .Permit(TaskTrigger.Cancel, TaskState.Cancelled);
+        var task = CreateTaskInState(DevelopmentTask.TaskState.Analysis);
+        
+        task.ApproveAnalysis();
+        
+        Assert.AreEqual(DevelopmentTask.TaskState.Planned, task.CurrentState);
     }
-
-    private void ConfigureInDevelopmentState()
+    
+    [TestMethod]
+    public void StartDevelopment_MovesFromPlannedToInDevelopment()
     {
-        _workflow.Configure(TaskState.InDevelopment)
-            .Permit(TaskTrigger.CompleteDevelopment, TaskState.CodeReview)
-            .Permit(TaskTrigger.Block, TaskState.Blocked);
+        var task = CreateTaskInState(DevelopmentTask.TaskState.Planned);
+        
+        task.StartDevelopment();
+        
+        Assert.AreEqual(DevelopmentTask.TaskState.InDevelopment, task.CurrentState);
     }
-
-    private void ConfigureCodeReviewState()
+    
+    [TestMethod]
+    public void CompleteDevelopment_MovesFromInDevelopmentToCodeReview()
     {
-        _workflow.Configure(TaskState.CodeReview)
-            .Permit(TaskTrigger.ApproveReview, TaskState.Testing)
-            .Permit(TaskTrigger.RequestChanges, TaskState.Fixing)
-            .Permit(TaskTrigger.Block, TaskState.Blocked);
+        var task = CreateTaskInState(DevelopmentTask.TaskState.InDevelopment);
+        
+        task.CompleteDevelopment();
+        
+        Assert.AreEqual(DevelopmentTask.TaskState.CodeReview, task.CurrentState);
     }
-
-    private void ConfigureTestingState()
+    
+    [TestMethod]
+    public void ApproveReview_MovesFromCodeReviewToTesting()
     {
-        _workflow.Configure(TaskState.Testing)
-            .Permit(TaskTrigger.PassTests, TaskState.ReadyForRelease)
-            .Permit(_failTestsTrigger, TaskState.Fixing, reason => !string.IsNullOrEmpty(reason));
+        var task = CreateTaskInState(DevelopmentTask.TaskState.CodeReview);
+        
+        task.ApproveReview();
+        
+        Assert.AreEqual(DevelopmentTask.TaskState.Testing, task.CurrentState);
     }
-
-    private void ConfigureFixingState()
+    
+    [TestMethod]
+    public void PassTests_MovesFromTestingToReadyForRelease()
     {
-        _workflow.Configure(TaskState.Fixing)
-            .Permit(TaskTrigger.FixIssue, TaskState.CodeReview);
+        var task = CreateTaskInState(DevelopmentTask.TaskState.Testing);
+        
+        task.PassTests();
+        
+        Assert.AreEqual(DevelopmentTask.TaskState.ReadyForRelease, task.CurrentState);
     }
-
-    private void ConfigureReadyForReleaseState()
+    
+    [TestMethod]
+    public void Release_MovesFromReadyForReleaseToDone()
     {
-        _workflow.Configure(TaskState.ReadyForRelease)
-            .Permit(TaskTrigger.Release, TaskState.Done)
-            .Permit(TaskTrigger.Reopen, TaskState.InDevelopment);
+        var task = CreateTaskInState(DevelopmentTask.TaskState.ReadyForRelease);
+        
+        task.Release();
+        
+        Assert.AreEqual(DevelopmentTask.TaskState.Done, task.CurrentState);
+        Assert.IsTrue(task.IsCompleted);
     }
+    
+    #endregion
 
-    private void ConfigureDoneState()
+    #region Negative Path and Error Handling Tests
+    
+    [TestMethod]
+    public void RequestChanges_MovesFromCodeReviewToFixing()
     {
-        _workflow.Configure(TaskState.Done)
-            .Permit(TaskTrigger.Reopen, TaskState.InDevelopment);
+        var task = CreateTaskInState(DevelopmentTask.TaskState.CodeReview);
+        
+        task.RequestChanges();
+        
+        Assert.AreEqual(DevelopmentTask.TaskState.Fixing, task.CurrentState);
     }
-
-    private void ConfigureBlockedState()
+    
+    [TestMethod]
+    public void FixIssue_MovesFromFixingToCodeReview()
     {
-        _workflow.Configure(TaskState.Blocked)
-            .Permit(TaskTrigger.Unblock, TaskState.Planned);
+        var task = CreateTaskInState(DevelopmentTask.TaskState.Fixing);
+        
+        task.FixIssue();
+        
+        Assert.AreEqual(DevelopmentTask.TaskState.CodeReview, task.CurrentState);
     }
-
-    private void ConfigureCancelledState()
+    
+    [TestMethod]
+    public void FailTests_MovesFromTestingToFixing()
     {
+        var task = CreateTaskInState(DevelopmentTask.TaskState.Testing);
+        
+        task.FailTests("Unit test failed");
+        
+        Assert.AreEqual(DevelopmentTask.TaskState.Fixing, task.CurrentState);
     }
+    
+    [TestMethod]
+    public void Block_MovesFromPlannedToBlocked()
+    {
+        var task = CreateTaskInState(DevelopmentTask.TaskState.Planned);
+        
+        task.Block();
+        
+        Assert.AreEqual(DevelopmentTask.TaskState.Blocked, task.CurrentState);
+    }
+    
+    [TestMethod]
+    public void Unblock_MovesFromBlockedToPlanned()
+    {
+        var task = CreateTaskInState(DevelopmentTask.TaskState.Blocked);
+        
+        task.Unblock();
+        
+        Assert.AreEqual(DevelopmentTask.TaskState.Planned, task.CurrentState);
+    }
+    
+    [TestMethod]
+    public void Cancel_MovesFromBacklogToCancelled()
+    {
+        var task = new DevelopmentTask();
+        
+        task.Cancel();
+        
+        Assert.AreEqual(DevelopmentTask.TaskState.Cancelled, task.CurrentState);
+        Assert.IsTrue(task.IsCompleted);
+    }
+    
+    [TestMethod]
+    public void Reopen_MovesFromDoneToInDevelopment()
+    {
+        var task = CreateTaskInState(DevelopmentTask.TaskState.Done);
+        
+        task.Reopen();
+        
+        Assert.AreEqual(DevelopmentTask.TaskState.InDevelopment, task.CurrentState);
+    }
+    
+    [TestMethod]
+    public void Reopen_MovesFromReadyForReleaseToInDevelopment()
+    {
+        var task = CreateTaskInState(DevelopmentTask.TaskState.ReadyForRelease);
+        
+        task.Reopen();
+        
+        Assert.AreEqual(DevelopmentTask.TaskState.InDevelopment, task.CurrentState);
+    }
+    
+    #endregion
 
-    private void Fire(TaskTrigger trigger) => _workflow.Fire(trigger);
+    #region Exception Tests (Invalid Transitions)
+    
+    [TestMethod]
+    [ExpectedException(typeof(InvalidOperationException))]
+    public void ApproveAnalysis_FromBacklog_ThrowsException()
+    {
+        var task = new DevelopmentTask();
+        
+        task.ApproveAnalysis();
+    }
+    
+    [TestMethod]
+    public void StartDevelopment_FromBacklog_ThrowsInvalidOperation()
+    {
+        var task = new DevelopmentTask();
+        
+        Assert.ThrowsException<InvalidOperationException>(() => task.StartDevelopment());
+    }
+    
+    [TestMethod]
+    public void Release_FromTesting_ThrowsException()
+    {
+        var task = CreateTaskInState(DevelopmentTask.TaskState.Testing);
+        
+        Assert.ThrowsException<InvalidOperationException>(() => task.Release());
+    }
+    
+    [TestMethod]
+    public void PassTests_FromCodeReview_ThrowsException()
+    {
+        var task = CreateTaskInState(DevelopmentTask.TaskState.CodeReview);
+        
+        Assert.ThrowsException<InvalidOperationException>(() => task.PassTests());
+    }
+    
+    [TestMethod]
+    public void Block_FromDone_ThrowsException()
+    {
+        var task = CreateTaskInState(DevelopmentTask.TaskState.Done);
+        
+        Assert.ThrowsException<InvalidOperationException>(() => task.Block());
+    }
+    
+    [TestMethod]
+    public void Cancel_FromDone_ThrowsException()
+    {
+        var task = CreateTaskInState(DevelopmentTask.TaskState.Done);
+        
+        Assert.ThrowsException<InvalidOperationException>(() => task.Cancel());
+    }
+    
+    [TestMethod]
+    public void ExceptionMessageContainsTriggerName()
+    {
+        var task = new DevelopmentTask();
+        
+        var exception = Assert.ThrowsException<InvalidOperationException>(() => task.Release());
+        
+        StringAssert.Contains(exception.Message, "Release");
+    }
+    
+    #endregion
+
+    #region CanFire Tests
+    
+    [TestMethod]
+    public void CanFire_ReturnsTrueForValidTransitions()
+    {
+        var task = CreateTaskInState(DevelopmentTask.TaskState.Planned);
+        
+        Assert.IsTrue(task.CanTrigger(DevelopmentTask.TaskTrigger.StartDevelopment));
+        Assert.IsTrue(task.CanTrigger(DevelopmentTask.TaskTrigger.Block));
+    }
+    
+    [TestMethod]
+    public void CanFire_ReturnsFalseForInvalidTransitions()
+    {
+        var task = CreateTaskInState(DevelopmentTask.TaskState.Planned);
+        
+        Assert.IsFalse(task.CanTrigger(DevelopmentTask.TaskTrigger.PassTests));
+        Assert.IsFalse(task.CanTrigger(DevelopmentTask.TaskTrigger.Release));
+    }
+    
+    [TestMethod]
+    public void CanFire_OnCancelledState_NoTransitionsAllowed()
+    {
+        var task = CreateTaskInState(DevelopmentTask.TaskState.Cancelled);
+        
+        Assert.IsFalse(task.CanTrigger(DevelopmentTask.TaskTrigger.Reopen));
+        Assert.IsFalse(task.CanTrigger(DevelopmentTask.TaskTrigger.StartAnalysis));
+    }
+    
+    #endregion
+
+    #region IsCompleted Tests
+    
+    [TestMethod]
+    public void IsCompleted_ReturnsTrueForDoneState()
+    {
+        var task = CreateTaskInState(DevelopmentTask.TaskState.Done);
+        
+        Assert.IsTrue(task.IsCompleted);
+    }
+    
+    [TestMethod]
+    public void IsCompleted_ReturnsTrueForCancelledState()
+    {
+        var task = CreateTaskInState(DevelopmentTask.TaskState.Cancelled);
+        
+        Assert.IsTrue(task.IsCompleted);
+    }
+    
+    [TestMethod]
+    public void IsCompleted_ReturnsFalseForInDevelopment()
+    {
+        var task = CreateTaskInState(DevelopmentTask.TaskState.InDevelopment);
+        
+        Assert.IsFalse(task.IsCompleted);
+    }
+    
+    [TestMethod]
+    public void IsCompleted_ReturnsFalseForBlocked()
+    {
+        var task = CreateTaskInState(DevelopmentTask.TaskState.Blocked);
+        
+        Assert.IsFalse(task.IsCompleted);
+    }
+    
+    #endregion
+
+    #region History Tracking Tests
+    
+    [TestMethod]
+    public void HistoryRecordsEachTransition()
+    {
+        var task = new DevelopmentTask();
+        
+        task.StartAnalysis();
+        task.ApproveAnalysis();
+        task.StartDevelopment();
+        
+        Assert.AreEqual(3, task.History.Count);
+    }
+    
+    [TestMethod]
+    public void HistoryContainsTransitionDetails()
+    {
+        var task = new DevelopmentTask();
+        
+        task.StartAnalysis();
+        
+        StringAssert.Contains(task.History[0], "Backlog --StartAnalysis--> Analysis");
+    }
+    
+    [TestMethod]
+    public void FailTests_RecordsInHistory()
+    {
+        var task = CreateTaskInState(DevelopmentTask.TaskState.Testing);
+        
+        task.FailTests("Critical bug found");
+        
+        StringAssert.Contains(task.History[^1], "Testing --FailTests--> Fixing");
+    }
+    
+    #endregion
+
+    #region Report and ToString Tests
+    
+    [TestMethod]
+    public void GetReport_ContainsCurrentState()
+    {
+        var task = CreateTaskInState(DevelopmentTask.TaskState.CodeReview);
+        
+        var report = task.GetReport();
+        
+        StringAssert.Contains(report, "CodeReview");
+    }
+    
+    [TestMethod]
+    public void GetReport_ContainsCompletedFlag()
+    {
+        var task = CreateTaskInState(DevelopmentTask.TaskState.Done);
+        
+        var report = task.GetReport();
+        
+        StringAssert.Contains(report, "Completed: True");
+    }
+    
+    [TestMethod]
+    public void ToString_ReturnsSameAsGetReport()
+    {
+        var task = new DevelopmentTask();
+        
+        Assert.AreEqual(task.GetReport(), task.ToString());
+    }
+    
+    #endregion
+
+    #region Additional Tests (to reach 20+ tests)
+    
+    [TestMethod]
+    public void StartAnalysis_FromAnalysis_ThrowsException()
+    {
+        var task = CreateTaskInState(DevelopmentTask.TaskState.Analysis);
+        
+        Assert.ThrowsException<InvalidOperationException>(() => task.StartAnalysis());
+    }
+    
+    [TestMethod]
+    public void CompleteDevelopment_FromPlanned_ThrowsException()
+    {
+        var task = CreateTaskInState(DevelopmentTask.TaskState.Planned);
+        
+        Assert.ThrowsException<InvalidOperationException>(() => task.CompleteDevelopment());
+    }
+    
+    [TestMethod]
+    public void RequestReview_FromInDevelopment_MovesToCodeReview()
+    {
+        var task = CreateTaskInState(DevelopmentTask.TaskState.InDevelopment);
+        
+        task.CompleteDevelopment();
+        task.RequestReview();
+        
+        Assert.AreEqual(DevelopmentTask.TaskState.CodeReview, task.CurrentState);
+    }
+    
+    [TestMethod]
+    public void StartTesting_FromCodeReview_MovesToTesting()
+    {
+        var task = CreateTaskInState(DevelopmentTask.TaskState.CodeReview);
+        
+        task.ApproveReview();
+        
+        Assert.AreEqual(DevelopmentTask.TaskState.Testing, task.CurrentState);
+    }
+    
+    [TestMethod]
+    public void MultipleFailFixCycles_WorkCorrectly()
+    {
+        var task = CreateTaskInState(DevelopmentTask.TaskState.Testing);
+        
+        task.FailTests("Bug #1");
+        Assert.AreEqual(DevelopmentTask.TaskState.Fixing, task.CurrentState);
+        
+        task.FixIssue();
+        Assert.AreEqual(DevelopmentTask.TaskState.CodeReview, task.CurrentState);
+        
+        task.ApproveReview();
+        Assert.AreEqual(DevelopmentTask.TaskState.Testing, task.CurrentState);
+        
+        task.PassTests();
+        Assert.AreEqual(DevelopmentTask.TaskState.ReadyForRelease, task.CurrentState);
+    }
+    
+    #endregion
+
+    #region Helper Methods
+    
+    private static DevelopmentTask CreateTaskInState(DevelopmentTask.TaskState targetState)
+    {
+        var task = new DevelopmentTask();
+        
+        // Достигаем нужного состояния через легальные переходы
+        switch (targetState)
+        {
+            case DevelopmentTask.TaskState.Backlog:
+                return task;
+                
+            case DevelopmentTask.TaskState.Analysis:
+                task.StartAnalysis();
+                break;
+                
+            case DevelopmentTask.TaskState.Planned:
+                task.StartAnalysis();
+                task.ApproveAnalysis();
+                break;
+                
+            case DevelopmentTask.TaskState.InDevelopment:
+                task.StartAnalysis();
+                task.ApproveAnalysis();
+                task.StartDevelopment();
+                break;
+                
+            case DevelopmentTask.TaskState.CodeReview:
+                task.StartAnalysis();
+                task.ApproveAnalysis();
+                task.StartDevelopment();
+                task.CompleteDevelopment();
+                break;
+                
+            case DevelopmentTask.TaskState.Testing:
+                task.StartAnalysis();
+                task.ApproveAnalysis();
+                task.StartDevelopment();
+                task.CompleteDevelopment();
+                task.RequestReview();
+                task.ApproveReview();
+                break;
+                
+            case DevelopmentTask.TaskState.Fixing:
+                task.StartAnalysis();
+                task.ApproveAnalysis();
+                task.StartDevelopment();
+                task.CompleteDevelopment();
+                task.RequestReview();
+                task.RequestChanges();
+                break;
+                
+            case DevelopmentTask.TaskState.ReadyForRelease:
+                task.StartAnalysis();
+                task.ApproveAnalysis();
+                task.StartDevelopment();
+                task.CompleteDevelopment();
+                task.RequestReview();
+                task.ApproveReview();
+                task.StartTesting();
+                task.PassTests();
+                break;
+                
+            case DevelopmentTask.TaskState.Done:
+                task.StartAnalysis();
+                task.ApproveAnalysis();
+                task.StartDevelopment();
+                task.CompleteDevelopment();
+                task.RequestReview();
+                task.ApproveReview();
+                task.StartTesting();
+                task.PassTests();
+                task.Release();
+                break;
+                
+            case DevelopmentTask.TaskState.Blocked:
+                task.StartAnalysis();
+                task.ApproveAnalysis();
+                task.Block();
+                break;
+                
+            case DevelopmentTask.TaskState.Cancelled:
+                task.Cancel();
+                break;
+                
+            default:
+                throw new ArgumentException($"Unknown state: {targetState}");
+        }
+        
+        return task;
+    }
+    
+    #endregion
 }
