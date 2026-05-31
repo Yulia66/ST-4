@@ -1,208 +1,192 @@
 using Stateless;
 
-namespace BugPro;
+namespace IssueTracker;
 
-public sealed class Bug
+public sealed class Issue
 {
-    private readonly List<string> _history = [];
+    private readonly List<string> _log = [];
 
-    public enum State
+    public enum Status
     {
-        New,
-        Triaged,
-        InProgress,
-        WaitingForInfo,
-        Deferred,
-        Resolved,
-        Closed,
-        Reopened,
-        Rejected,
-        Duplicate,
-        CannotReproduce
+        Created,
+        Reviewed,
+        Active,
+        AwaitingResponse,
+        Postponed,
+        Fixed,
+        Verified,
+        ReopenedState,
+        Declined,
+        DuplicateEntry,
+        Unreproducible
     }
 
-    public enum Trigger
+    public enum Action
     {
-        Triage,
-        StartProgress,
-        RequestInfo,
-        ProvideInfo,
-        Defer,
-        Resume,
-        Resolve,
-        VerifyFix,
-        Reopen,
-        Close,
-        MarkNotABug,
-        MarkDuplicate,
-        MarkCannotReproduce,
-        ReturnToTriaged
+        Review,
+        StartWork,
+        AskQuestion,
+        AnswerQuestion,
+        Postpone,
+        Continue,
+        MarkFixed,
+        ValidateFix,
+        ReopenIssue,
+        ConfirmClose,
+        RejectIssue,
+        MarkAsDuplicate,
+        MarkUnreproducible,
+        SendBackForReview
     }
 
-    private readonly StateMachine<State, Trigger> _workflow;
-    private readonly StateMachine<State, Trigger>.TriggerWithParameters<bool> _verifyFixTrigger;
+    private readonly StateMachine<Status, Action> _machine;
+    private readonly StateMachine<Status, Action>.TriggerWithParameters<bool> _validateTrigger;
 
-    public Bug()
+    public Issue()
     {
-        _workflow = new StateMachine<State, Trigger>(State.New);
-        _verifyFixTrigger = _workflow.SetTriggerParameters<bool>(Trigger.VerifyFix);
+        _machine = new StateMachine<Status, Action>(Status.Created);
+        _validateTrigger = _machine.SetTriggerParameters<bool>(Action.ValidateFix);
 
-        ConfigureWorkflow();
+        SetupTransitions();
     }
 
-    public IReadOnlyList<string> History => _history.AsReadOnly();
+    public IReadOnlyList<string> EventLog => _log.AsReadOnly();
+    public Status CurrentStatus => _machine.State;
 
-    public State CurrentState => _workflow.State;
+    public bool CanExecute(Action action) => _machine.CanFire(action);
+    
+    public bool IsTerminal => CurrentStatus is Status.Verified or Status.Declined or Status.DuplicateEntry;
 
-    public bool CanFire(Trigger trigger) => _workflow.CanFire(trigger);
+    public void PerformReview() => Execute(Action.Review);
+    public void StartWorking() => Execute(Action.StartWork);
+    public void RequestDetails() => Execute(Action.AskQuestion);
+    public void SupplyDetails() => Execute(Action.AnswerQuestion);
+    public void SetPostponed() => Execute(Action.Postpone);
+    public void ResumeWork() => Execute(Action.Continue);
+    public void MarkAsFixed() => Execute(Action.MarkFixed);
+    public void ValidateFix(bool isResolved) => _machine.Fire(_validateTrigger, isResolved);
+    public void ReopenIssue() => Execute(Action.ReopenIssue);
+    public void FinalizeClose() => Execute(Action.ConfirmClose);
+    public void MarkAsRejected() => Execute(Action.RejectIssue);
+    public void MarkAsDuplicate() => Execute(Action.MarkAsDuplicate);
+    public void MarkUnreproducible() => Execute(Action.MarkUnreproducible);
+    public void ReturnForReview() => Execute(Action.SendBackForReview);
 
-    public bool IsFinalState =>
-        CurrentState is State.Closed or State.Rejected or State.Duplicate;
+    public string GenerateReport() =>
+        $"Issue status: {CurrentStatus}; terminal: {IsTerminal}; log entries: {EventLog.Count}";
 
-    public void Triage() => Fire(Trigger.Triage);
+    public override string ToString() => GenerateReport();
 
-    public void StartProgress() => Fire(Trigger.StartProgress);
-
-    public void RequestInfo() => Fire(Trigger.RequestInfo);
-
-    public void ProvideInfo() => Fire(Trigger.ProvideInfo);
-
-    public void Defer() => Fire(Trigger.Defer);
-
-    public void Resume() => Fire(Trigger.Resume);
-
-    public void Resolve() => Fire(Trigger.Resolve);
-
-    public void VerifyFix(bool isFixed) => _workflow.Fire(_verifyFixTrigger, isFixed);
-
-    public void Reopen() => Fire(Trigger.Reopen);
-
-    public void Close() => Fire(Trigger.Close);
-
-    public void MarkNotABug() => Fire(Trigger.MarkNotABug);
-
-    public void MarkDuplicate() => Fire(Trigger.MarkDuplicate);
-
-    public void MarkCannotReproduce() => Fire(Trigger.MarkCannotReproduce);
-
-    public void ReturnToTriaged() => Fire(Trigger.ReturnToTriaged);
-
-    public string GetStatusReport() =>
-        $"Bug state: {CurrentState}; final: {IsFinalState}; history size: {History.Count}";
-
-    public override string ToString() => GetStatusReport();
-
-    private void ConfigureWorkflow()
+    private void SetupTransitions()
     {
-        RegisterTransitionTracking();
-
-        ConfigureNewState();
-        ConfigureTriagedState();
-        ConfigureInProgressState();
-        ConfigureWaitingForInfoState();
-        ConfigureDeferredState();
-        ConfigureResolvedState();
-        ConfigureReviewStates();
+        TrackTransitions();
+        ConfigureCreatedState();
+        ConfigureReviewedState();
+        ConfigureActiveState();
+        ConfigureAwaitingState();
+        ConfigurePostponedState();
+        ConfigureFixedState();
+        ConfigureTerminalStates();
         ConfigureReopenedState();
     }
 
-    private void RegisterTransitionTracking()
+    private void TrackTransitions()
     {
-        _workflow.OnTransitioned(transition => _history.Add(FormatTransition(transition)));
+        _machine.OnTransitioned(transition => _log.Add(FormatTransition(transition)));
     }
 
-    private void ConfigureNewState()
+    private void ConfigureCreatedState()
     {
-        _workflow.Configure(State.New)
-            .Permit(Trigger.Triage, State.Triaged);
+        _machine.Configure(Status.Created)
+            .Permit(Action.Review, Status.Reviewed);
     }
 
-    private void ConfigureTriagedState()
+    private void ConfigureReviewedState()
     {
-        _workflow.Configure(State.Triaged)
-            .Permit(Trigger.StartProgress, State.InProgress)
-            .Permit(Trigger.RequestInfo, State.WaitingForInfo)
-            .Permit(Trigger.Defer, State.Deferred)
-            .Permit(Trigger.MarkNotABug, State.Rejected)
-            .Permit(Trigger.MarkDuplicate, State.Duplicate)
-            .Permit(Trigger.MarkCannotReproduce, State.CannotReproduce);
+        _machine.Configure(Status.Reviewed)
+            .Permit(Action.StartWork, Status.Active)
+            .Permit(Action.AskQuestion, Status.AwaitingResponse)
+            .Permit(Action.Postpone, Status.Postponed)
+            .Permit(Action.RejectIssue, Status.Declined)
+            .Permit(Action.MarkAsDuplicate, Status.DuplicateEntry)
+            .Permit(Action.MarkUnreproducible, Status.Unreproducible);
     }
 
-    private void ConfigureInProgressState()
+    private void ConfigureActiveState()
     {
-        _workflow.Configure(State.InProgress)
-            .Permit(Trigger.RequestInfo, State.WaitingForInfo)
-            .Permit(Trigger.Defer, State.Deferred)
-            .Permit(Trigger.Resolve, State.Resolved);
+        _machine.Configure(Status.Active)
+            .Permit(Action.AskQuestion, Status.AwaitingResponse)
+            .Permit(Action.Postpone, Status.Postponed)
+            .Permit(Action.MarkFixed, Status.Fixed);
     }
 
-    private void ConfigureWaitingForInfoState()
+    private void ConfigureAwaitingState()
     {
-        _workflow.Configure(State.WaitingForInfo)
-            .Permit(Trigger.ProvideInfo, State.Triaged)
-            .Permit(Trigger.StartProgress, State.InProgress);
+        _machine.Configure(Status.AwaitingResponse)
+            .Permit(Action.AnswerQuestion, Status.Reviewed)
+            .Permit(Action.StartWork, Status.Active);
     }
 
-    private void ConfigureDeferredState()
+    private void ConfigurePostponedState()
     {
-        _workflow.Configure(State.Deferred)
-            .Permit(Trigger.Resume, State.Triaged);
+        _machine.Configure(Status.Postponed)
+            .Permit(Action.Continue, Status.Reviewed);
     }
 
-    private void ConfigureResolvedState()
+    private void ConfigureFixedState()
     {
-        _workflow.Configure(State.Resolved)
-            .PermitIf(_verifyFixTrigger, State.Closed, isFixed => isFixed)
-            .PermitIf(_verifyFixTrigger, State.Reopened, isFixed => !isFixed)
-            .Permit(Trigger.Reopen, State.Reopened);
+        _machine.Configure(Status.Fixed)
+            .PermitIf(_validateTrigger, Status.Verified, isResolved => isResolved)
+            .PermitIf(_validateTrigger, Status.ReopenedState, isResolved => !isResolved)
+            .Permit(Action.ReopenIssue, Status.ReopenedState);
     }
 
-    private void ConfigureReviewStates()
+    private void ConfigureTerminalStates()
     {
-        _workflow.Configure(State.CannotReproduce)
-            .Permit(Trigger.Close, State.Closed)
-            .Permit(Trigger.Reopen, State.Reopened);
+        _machine.Configure(Status.Unreproducible)
+            .Permit(Action.ConfirmClose, Status.Verified)
+            .Permit(Action.ReopenIssue, Status.ReopenedState);
 
-        _workflow.Configure(State.Rejected)
-            .Permit(Trigger.Reopen, State.Reopened);
+        _machine.Configure(Status.Declined)
+            .Permit(Action.ReopenIssue, Status.ReopenedState);
 
-        _workflow.Configure(State.Duplicate)
-            .Permit(Trigger.Reopen, State.Reopened);
+        _machine.Configure(Status.DuplicateEntry)
+            .Permit(Action.ReopenIssue, Status.ReopenedState);
 
-        _workflow.Configure(State.Closed)
-            .Permit(Trigger.Reopen, State.Reopened);
+        _machine.Configure(Status.Verified)
+            .Permit(Action.ReopenIssue, Status.ReopenedState);
     }
 
     private void ConfigureReopenedState()
     {
-        _workflow.Configure(State.Reopened)
-            .Permit(Trigger.ReturnToTriaged, State.Triaged)
-            .Permit(Trigger.StartProgress, State.InProgress);
+        _machine.Configure(Status.ReopenedState)
+            .Permit(Action.SendBackForReview, Status.Reviewed)
+            .Permit(Action.StartWork, Status.Active);
     }
 
-    private static string FormatTransition(StateMachine<State, Trigger>.Transition transition) =>
-        $"{transition.Source} --{transition.Trigger}--> {transition.Destination}";
+    private static string FormatTransition(StateMachine<Status, Action>.Transition t) =>
+        $"{t.Source} --{t.Trigger}--> {t.Destination}";
 
-    private void Fire(Trigger trigger) => _workflow.Fire(trigger);
+    private void Execute(Action action) => _machine.Fire(action);
 }
 
-public static class Program
+public static class Runner
 {
     public static void Main()
     {
-        var bug = new Bug();
+        var issue = new Issue();
 
-        Console.WriteLine("Bug workflow demo");
-        Console.WriteLine(bug.GetStatusReport());
-        bug.Triage();
-        bug.StartProgress();
-        bug.Resolve();
-        bug.VerifyFix(false);
-        bug.ReturnToTriaged();
-        Console.WriteLine(bug.GetStatusReport());
-        foreach (var item in bug.History)
+        Console.WriteLine("Issue workflow demonstration");
+        Console.WriteLine(issue.GenerateReport());
+        issue.PerformReview();
+        issue.StartWorking();
+        issue.MarkAsFixed();
+        issue.ValidateFix(false);
+        issue.ReturnForReview();
+        Console.WriteLine(issue.GenerateReport());
+        foreach (var entry in issue.EventLog)
         {
-            Console.WriteLine(item);
+            Console.WriteLine(entry);
         }
     }
 }
